@@ -1,0 +1,26 @@
+# Core requirements
+presidio-analyzer>=2.2.350
+presidio-anonymizer>=2.2.350
+spacy>=3.5.0
+pyyaml>=6.0
+click>=8.0.0
+python-dotenv>=1.0.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
+# Utilities
+colorama>=0.4.6
+tqdm>=4.65.0
+jsonschema>=4.17.0
+
+# Optional for enhanced features
+faker>=18.0.0  # For realistic data replacement
+phonenumbers>=8.13.0  # Better phone number detection
+email-validator>=2.0.0  # Email validation
