@@ -1,0 +1,81 @@
+# Bias Anonymizer Configuration File
+# This file configures the behavior of the bias anonymizer
+
+# Detection settings
+detect_bias: true
+detect_pii: true
+
+# Specific bias categories to detect (comment out for all)
+bias_categories:
+  - gender
+  - race_ethnicity
+  - age
+  - disability
+  - marital_status
+  - nationality
+  - sexual_orientation
+  - religion
+  - political_affiliation
+  - socioeconomic_background
+  - pregnancy_maternity
+  - union_membership
+  - health_condition
+  - criminal_background
+
+# Confidence threshold for detection (0.0 to 1.0)
+confidence_threshold: 0.7
+
+# Language for analysis
+language: en
+
+# Anonymization operators per entity type
+# Available operators: replace, mask, hash, encrypt, redact, keep, remove
+operators:
+  # PII entities
+  PERSON: replace
+  EMAIL_ADDRESS: mask
+  PHONE_NUMBER: hash
+  LOCATION: replace
+  DATE_TIME: replace
+  CREDIT_CARD: mask
+  IP_ADDRESS: mask
+  US_SSN: mask
+  
+  # Bias indicators - remove by default
+  GENDER_BIAS: remove
+  RACE_ETHNICITY_BIAS: remove
+  AGE_BIAS: remove
+  DISABILITY_BIAS: remove
+  MARITAL_STATUS_BIAS: remove
+  NATIONALITY_BIAS: remove
+  SEXUAL_ORIENTATION_BIAS: remove
+  RELIGION_BIAS: remove
+  POLITICAL_AFFILIATION_BIAS: remove
+  SOCIOECONOMIC_BACKGROUND_BIAS: remove
+  PREGNANCY_MATERNITY_BIAS: remove
+  UNION_MEMBERSHIP_BIAS: remove
+  HEALTH_CONDITION_BIAS: remove
+  CRIMINAL_BACKGROUND_BIAS: remove
+  
+  # Catch-all for bias indicators
+  BIAS_INDICATOR: remove
+  
+  # Default operator for unspecified entities
+  DEFAULT: replace
+
+# Replacement values for replace operator
+replacements:
+  PERSON: "[NAME]"
+  EMAIL_ADDRESS: "[EMAIL]"
+  PHONE_NUMBER: "[PHONE]"
+  LOCATION: "[LOCATION]"
+  DATE_TIME: "[DATE]"
+  CREDIT_CARD: "[CARD]"
+  IP_ADDRESS: "[IP]"
+  US_SSN: "[SSN]"
+  DEFAULT: "[REDACTED]"
+
+# Processing settings
+preserve_structure: true
+batch_size: 100
+parallel_processing: false
