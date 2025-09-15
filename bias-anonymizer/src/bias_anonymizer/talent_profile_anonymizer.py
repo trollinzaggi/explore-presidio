@@ -7,7 +7,9 @@ from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
 from enum import Enum
 
-from bias_anonymizer import JSONAnonymizer, AnonymizerConfig
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
 from bias_anonymizer.bias_words import BiasWords
 
 
@@ -24,124 +26,43 @@ class TalentProfileConfig:
     # Fields that need special handling
     special_handling_fields: Dict[str, str] = None
     
+    # Anonymization strategy: "redact", "replace", or "custom"
+    # redact: removes bias words completely
+    # replace: replaces with tokens like [GENDER], [RACE]
+    # custom: uses custom replacement tokens
+    anonymization_strategy: str = "redact"
+    
+    # Custom replacement tokens for "custom" strategy
+    replacement_tokens: Dict[str, str] = None
+    
+    # Operators for each entity type (for fine-grained control)
+    operators: Dict[str, str] = None
+    
+    # Detection settings
+    detect_bias: bool = True
+    detect_pii: bool = True
+    confidence_threshold: float = 0.7
+    
     def __post_init__(self):
+        # Only set defaults if not provided (allows YAML to override everything)
         if self.preserve_fields is None:
-            self.preserve_fields = {
-                # Core business fields - needed for matching
-                "core.rank.code",
-                "core.rank.id",
-                "core.employeeType.code",
-                "core.jobCode",
-                "core.gcrs.businessDivisionCode",
-                "core.gcrs.businessUnitCode",
-                "core.gcrs.businessAreaCode",
-                "core.gcrs.businessSectorCode",
-                "core.gcrs.businessSegmentCode",
-                "core.gcrs.businessFunctionCode",
-                
-                # Work location codes (not descriptions)
-                "core.workLocation.code",
-                "core.workLocation.buildingCode",
-                "core.workLocation.postalCode",
-                "core.workLocation.stateCode",
-                "core.workLocation.countryCode",
-                
-                # Experience metadata
-                "experience.crossDivisionalExperience",
-                "experience.internationalExperience",
-                "experience.timeInCurrentRoleInDays",
-                
-                # Education and certifications (skills-based)
-                "qualification.educations[*].degree",
-                "qualification.educations[*].areaOfStudy",
-                "qualification.educations[*].completionYear",
-                "qualification.certifications",
-                
-                # System fields
-                "version",
-                "completionScore",
-                "userId",  # May need to hash instead of preserve
-                "externalSourceType"
-            }
-        
+            self.preserve_fields = set()
+        elif not isinstance(self.preserve_fields, set):
+            self.preserve_fields = set(self.preserve_fields)
+            
         if self.always_anonymize_fields is None:
-            self.always_anonymize_fields = {
-                # Descriptions that might contain bias
-                "core.rank.description",
-                "core.employeeType.description",
-                "core.businessTitle",
-                "core.gcrs.businessDivisionDescription",
-                "core.gcrs.businessUnitDescription",
-                "core.gcrs.businessAreaDescription",
-                "core.gcrs.businessSectorDescription",
-                "core.gcrs.businessSegmentDescription",
-                "core.gcrs.businessFunctionDescription",
-                
-                # Location descriptions (might reveal demographic info)
-                "core.workLocation.description",
-                "core.workLocation.city",
-                "core.workLocation.state",
-                "core.workLocation.county",
-                "core.workLocation.country",
-                "core.workLocation.region",
-                
-                # Dates that could reveal age
-                "core.enterpriseSeniorityDate",
-                
-                # Work eligibility (nationality/immigration status)
-                "workEligibility",
-                
-                # Language proficiency (potential bias)
-                "language.languages",
-                
-                # Affiliations (could reveal personal info)
-                "affiliation.awards",
-                "affiliation.boards",
-                "affiliation.mandates",
-                "affiliation.memberships",
-                
-                # Experience descriptions
-                "experience.experiences[*].company",
-                "experience.experiences[*].description",
-                "experience.experiences[*].jobTitle",
-                "experience.experiences[*].country.description",
-                
-                # Education institution names (could reveal background)
-                "qualification.educations[*].institutionName",
-                "qualification.educations[*].achievements",
-                
-                # Career preferences (might contain bias)
-                "careerAspirationPreference",
-                "careerLocationPreference",
-                "careerRolePreference",
-                
-                # Audit fields (might contain names)
-                "language.createdBy",
-                "language.lastModifiedBy",
-                "affiliation.createdBy",
-                "affiliation.lastModifiedBy",
-                "experience.createdBy",
-                "experience.lastModifiedBy",
-                "qualification.createdBy",
-                "qualification.lastModifiedBy"
-            }
-        
+            self.always_anonymize_fields = set()
+        elif not isinstance(self.always_anonymize_fields, set):
+            self.always_anonymize_fields = set(self.always_anonymize_fields)
+            
         if self.special_handling_fields is None:
-            self.special_handling_fields = {
-                # Hash user ID instead of removing
-                "userId": "hash",
-                
-                # Generalize dates to year only
-                "experience.experiences[*].startDate": "year_only",
-                "experience.experiences[*].endDate": "year_only",
-                "createdDateTime": "remove",
-                "lastModifiedDateTime": "remove",
-                
-                # Categorize reporting distance
-                "core.reportingDistance.geb": "categorize",
-                "core.reportingDistance.ceo": "categorize",
-                "core.reportingDistance.chairman": "categorize"
-            }
+            self.special_handling_fields = {}
+            
+        if self.replacement_tokens is None:
+            self.replacement_tokens = {}
+            
+        if self.operators is None:
+            self.operators = {}
 
 
 class TalentProfileAnonymizer:
@@ -159,31 +80,15 @@ class TalentProfileAnonymizer:
         """
         self.profile_config = config or TalentProfileConfig()
         
-        # Initialize base anonymizer with bias detection
-        self.base_config = AnonymizerConfig(
-            detect_bias=True,
-            detect_pii=True,
-            confidence_threshold=0.7,
-            operators={
-                "PERSON": "replace",
-                "EMAIL_ADDRESS": "mask",
-                "PHONE_NUMBER": "hash",
-                "DATE_TIME": "replace",
-                "LOCATION": "replace",
-                "BIAS_INDICATOR": "remove",
-                "DEFAULT": "replace"
-            },
-            replacements={
-                "PERSON": "[REDACTED]",
-                "EMAIL_ADDRESS": "[EMAIL]",
-                "PHONE_NUMBER": "[PHONE]",
-                "LOCATION": "[LOCATION]",
-                "DATE_TIME": "[DATE]",
-                "DEFAULT": ""
-            }
-        )
+        # Initialize Presidio components
+        self.analyzer = AnalyzerEngine()
+        self.anonymizer_engine = AnonymizerEngine()
         
-        self.anonymizer = JSONAnonymizer(config=self.base_config)
+        # Register custom bias recognizers
+        self._register_bias_recognizers()
+        
+        # Configure operators based on strategy
+        self.operators = self._configure_operators(self.profile_config.anonymization_strategy)
     
     def anonymize_talent_profile(self, 
                                  profile: Dict[str, Any],
@@ -221,6 +126,84 @@ class TalentProfileAnonymizer:
         self._clean_empty_structures(anonymized)
         
         return anonymized
+    
+    def _register_bias_recognizers(self):
+        """Register all our custom bias recognizers with Presidio."""
+        from bias_anonymizer.bias_recognizers import (
+            GenderBiasRecognizer,
+            RaceBiasRecognizer,
+            AgeBiasRecognizer,
+            SocioeconomicBiasRecognizer,
+            ReligionBiasRecognizer,
+            NationalityBiasRecognizer,
+            DisabilityBiasRecognizer,
+            PoliticalBiasRecognizer,
+            FamilyStatusBiasRecognizer,
+            EducationBiasRecognizer
+        )
+        
+        # Create instances of all recognizers
+        recognizers = [
+            GenderBiasRecognizer(),
+            RaceBiasRecognizer(),
+            AgeBiasRecognizer(),
+            SocioeconomicBiasRecognizer(),
+            ReligionBiasRecognizer(),
+            NationalityBiasRecognizer(),
+            DisabilityBiasRecognizer(),
+            PoliticalBiasRecognizer(),
+            FamilyStatusBiasRecognizer(),
+            EducationBiasRecognizer()
+        ]
+        
+        # Register each recognizer with the analyzer
+        for recognizer in recognizers:
+            self.analyzer.registry.add_recognizer(recognizer)
+    
+    def _configure_operators(self, strategy: str) -> Dict[str, OperatorConfig]:
+        """Configure how Presidio handles each entity type."""
+        
+        if strategy in ["remove", "redact"]:
+            # Use 'redact' operator to remove detected entities
+            # Support both "remove" (backward compat) and "redact" (correct term)
+            return {
+                "DEFAULT": OperatorConfig("redact"),
+            }
+        
+        elif strategy == "replace":
+            # Replace with generic tokens
+            return {
+                "GENDER_BIAS": OperatorConfig("replace", {"new_value": "[GENDER]"}),
+                "RACE_BIAS": OperatorConfig("replace", {"new_value": "[RACE]"}),
+                "AGE_BIAS": OperatorConfig("replace", {"new_value": "[AGE]"}),
+                "SOCIOECONOMIC_BIAS": OperatorConfig("replace", {"new_value": "[BACKGROUND]"}),
+                "RELIGION_BIAS": OperatorConfig("replace", {"new_value": "[RELIGION]"}),
+                "NATIONALITY_BIAS": OperatorConfig("replace", {"new_value": "[NATIONALITY]"}),
+                "DISABILITY_BIAS": OperatorConfig("replace", {"new_value": "[ABILITY]"}),
+                "POLITICAL_BIAS": OperatorConfig("replace", {"new_value": "[POLITICAL]"}),
+                "FAMILY_STATUS_BIAS": OperatorConfig("replace", {"new_value": "[FAMILY]"}),
+                "EDUCATION_BIAS": OperatorConfig("replace", {"new_value": "[EDUCATION]"}),
+                "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "[EMAIL]"}),
+                "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "[PHONE]"}),
+                "PERSON": OperatorConfig("replace", {"new_value": "[NAME]"}),
+                "DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"}),
+            }
+        
+        elif strategy == "custom":
+            # Custom replacements from config
+            if self.profile_config.replacement_tokens:
+                operators = {}
+                for entity_type, replacement in self.profile_config.replacement_tokens.items():
+                    operators[entity_type] = OperatorConfig("replace", {"new_value": replacement})
+                operators["DEFAULT"] = OperatorConfig("redact")  # Use redact as default
+                return operators
+            else:
+                # Default to redact if no custom tokens
+                return {"DEFAULT": OperatorConfig("redact")}
+        
+        else:
+            # Default to redact
+            return {"DEFAULT": OperatorConfig("redact")}
     
     def _get_fields_to_anonymize(self,
                                  profile: Dict,
@@ -341,16 +324,30 @@ class TalentProfileAnonymizer:
         if isinstance(current, dict) and last_part in current:
             value = current[last_part]
             if isinstance(value, str):
-                # Use the base anonymizer for string values
-                current[last_part] = self.anonymizer.anonymize_text(value)
+                # Use Presidio to anonymize
+                current[last_part] = self._anonymize_text(value)
             elif isinstance(value, list):
                 # Anonymize each item in the list
                 for i, item in enumerate(value):
                     if isinstance(item, str):
-                        value[i] = self.anonymizer.anonymize_text(item)
+                        value[i] = self._anonymize_text(item)
                     elif isinstance(item, dict):
                         # Recursively anonymize dict items
                         self._anonymize_dict_values(item)
+    
+    def _anonymize_text(self, text: str) -> str:
+        """Anonymize text using Presidio with our configuration."""
+        # Analyze text with our custom recognizers
+        results = self.analyzer.analyze(text=text, language='en')
+        
+        # Anonymize with our configured operators
+        anonymized_result = self.anonymizer_engine.anonymize(
+            text=text,
+            analyzer_results=results,
+            operators=self.operators
+        )
+        
+        return anonymized_result.text
     
     def _anonymize_dict_values(self, data: Dict):
         """
@@ -361,13 +358,13 @@ class TalentProfileAnonymizer:
         """
         for key, value in data.items():
             if isinstance(value, str):
-                data[key] = self.anonymizer.anonymize_text(value)
+                data[key] = self._anonymize_text(value)
             elif isinstance(value, dict):
                 self._anonymize_dict_values(value)
             elif isinstance(value, list):
                 for i, item in enumerate(value):
                     if isinstance(item, str):
-                        value[i] = self.anonymizer.anonymize_text(item)
+                        value[i] = self._anonymize_text(item)
                     elif isinstance(item, dict):
                         self._anonymize_dict_values(item)
     
@@ -534,25 +531,36 @@ class TalentProfileAnonymizer:
         for field_path in fields_to_check:
             value = self._get_field_value(profile, field_path)
             if value and isinstance(value, str):
-                analysis = self.anonymizer.analyze({"text": value})
+                # Analyze with Presidio
+                results = self.analyzer.analyze(text=value, language='en')
                 
-                if analysis["total_entities"] > 0:
+                if results:
+                    # Categorize entity types
+                    bias_types = []
+                    pii_types = []
+                    
+                    for result in results:
+                        if "BIAS" in result.entity_type:
+                            bias_types.append(result.entity_type)
+                        else:
+                            pii_types.append(result.entity_type)
+                    
                     field_report = {
                         "field": field_path,
-                        "entities_found": analysis["total_entities"],
-                        "bias_categories": analysis["bias_categories"],
-                        "pii_types": analysis["pii_types"]
+                        "entities_found": len(results),
+                        "bias_categories": bias_types,
+                        "pii_types": pii_types
                     }
                     
                     report["details"].append(field_report)
                     
-                    if analysis["bias_categories"]:
+                    if bias_types:
                         report["fields_with_bias"].append(field_path)
-                        report["bias_categories_found"].update(analysis["bias_categories"])
+                        report["bias_categories_found"].update(bias_types)
                     
-                    if analysis["pii_types"]:
+                    if pii_types:
                         report["fields_with_pii"].append(field_path)
-                        report["pii_types_found"].update(analysis["pii_types"])
+                        report["pii_types_found"].update(pii_types)
         
         # Convert sets to lists for JSON serialization
         report["bias_categories_found"] = list(report["bias_categories_found"])

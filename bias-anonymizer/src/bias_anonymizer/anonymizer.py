@@ -13,12 +13,35 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-from .config import AnonymizerConfig
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
 from .bias_recognizers import BiasRecognizerFactory
 from .exceptions import AnonymizerException, ValidationError
 from .utils import JsonPath, deep_get, deep_set
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AnonymizerConfig:
+    """Basic configuration for the anonymizer."""
+    detect_bias: bool = True
+    detect_pii: bool = True
+    bias_categories: Optional[List[str]] = None
+    confidence_threshold: float = 0.7
+    language: str = "en"
+    operators: Dict[str, str] = field(default_factory=lambda: {
+        "BIAS_INDICATOR": "redact",
+        "DEFAULT": "replace"
+    })
+    replacements: Dict[str, str] = field(default_factory=lambda: {
+        "DEFAULT": "[REDACTED]"
+    })
+    custom_recognizers: List[Any] = field(default_factory=list)
+    encryption_key: Optional[str] = None
+    preserve_structure: bool = True
+    batch_size: int = 100
+    parallel_processing: bool = False
 
 
 class JSONAnonymizer:
@@ -262,8 +285,8 @@ class JSONAnonymizer:
             if entity_type in self.config.operators:
                 operator_type = self.config.operators[entity_type]
             elif "_BIAS" in entity_type or entity_type == "BIAS_INDICATOR":
-                # Default for bias indicators is to remove
-                operator_type = "remove"
+                # Default for bias indicators is to redact
+                operator_type = "redact"
             else:
                 # Use default operator
                 operator_type = self.config.operators.get("DEFAULT", "replace")
@@ -275,8 +298,8 @@ class JSONAnonymizer:
                     self.config.replacements.get("DEFAULT", f"[{entity_type}]")
                 )
                 operators[entity_type] = OperatorConfig("replace", {"new_value": replacement})
-            elif operator_type == "remove":
-                operators[entity_type] = OperatorConfig("replace", {"new_value": ""})
+            elif operator_type == "redact":
+                operators[entity_type] = OperatorConfig("redact")
             elif operator_type == "mask":
                 operators[entity_type] = OperatorConfig("mask", {
                     "masking_char": "*",

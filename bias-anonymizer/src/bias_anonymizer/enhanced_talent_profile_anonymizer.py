@@ -9,6 +9,9 @@ from enum import Enum
 
 from bias_anonymizer import JSONAnonymizer, AnonymizerConfig
 from bias_anonymizer.bias_words import BiasWords
+from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
 
 
 @dataclass
@@ -40,6 +43,12 @@ class TalentProfileConfig:
     
     # Fields that are typically safe in nested structures
     common_safe_fields: Set[str] = None
+    
+    # Anonymization strategy: "remove", "replace", or "custom"
+    anonymization_strategy: str = "remove"
+    
+    # Replacement tokens for replace strategy
+    replacement_tokens: Dict[str, str] = None
     
     def __post_init__(self):
         if self.preserve_patterns is None:
@@ -222,13 +231,15 @@ class EnhancedTalentProfileAnonymizer:
         """Initialize the enhanced anonymizer."""
         self.config = config or TalentProfileConfig()
         
-        # Initialize base anonymizer
-        base_config = AnonymizerConfig(
-            detect_bias=True,
-            detect_pii=True,
-            confidence_threshold=0.7
-        )
-        self.anonymizer = JSONAnonymizer(config=base_config)
+        # Initialize Presidio components
+        self.analyzer = AnalyzerEngine()
+        self.anonymizer_engine = AnonymizerEngine()
+        
+        # Register custom bias recognizers
+        self._register_bias_recognizers()
+        
+        # Configure operators based on strategy (default: remove)
+        self.operators = self._configure_operators(self.config.anonymization_strategy)
         
         # Cache for processed paths
         self._processed_paths = set()
@@ -259,6 +270,81 @@ class EnhancedTalentProfileAnonymizer:
         self._clean_empty_structures(anonymized)
         
         return anonymized
+    
+    def _register_bias_recognizers(self):
+        """Register all our custom bias recognizers with Presidio."""
+        from bias_anonymizer.bias_recognizers import (
+            GenderBiasRecognizer,
+            RaceBiasRecognizer,
+            AgeBiasRecognizer,
+            SocioeconomicBiasRecognizer,
+            ReligionBiasRecognizer,
+            NationalityBiasRecognizer,
+            DisabilityBiasRecognizer,
+            PoliticalBiasRecognizer,
+            FamilyStatusBiasRecognizer,
+            EducationBiasRecognizer
+        )
+        
+        # Create instances of all recognizers
+        recognizers = [
+            GenderBiasRecognizer(),
+            RaceBiasRecognizer(),
+            AgeBiasRecognizer(),
+            SocioeconomicBiasRecognizer(),
+            ReligionBiasRecognizer(),
+            NationalityBiasRecognizer(),
+            DisabilityBiasRecognizer(),
+            PoliticalBiasRecognizer(),
+            FamilyStatusBiasRecognizer(),
+            EducationBiasRecognizer()
+        ]
+        
+        # Register each recognizer with the analyzer
+        for recognizer in recognizers:
+            self.analyzer.registry.add_recognizer(recognizer)
+    
+    def _configure_operators(self, strategy: str) -> Dict[str, OperatorConfig]:
+        """Configure how Presidio handles each entity type."""
+        
+        if strategy == "remove":
+            # Use 'redact' operator to remove detected entities
+            return {
+                "DEFAULT": OperatorConfig("redact"),
+            }
+        
+        elif strategy == "replace":
+            # Replace with generic tokens
+            return {
+                "GENDER_BIAS": OperatorConfig("replace", {"new_value": "[GENDER]"}),
+                "RACE_BIAS": OperatorConfig("replace", {"new_value": "[RACE]"}),
+                "AGE_BIAS": OperatorConfig("replace", {"new_value": "[AGE]"}),
+                "SOCIOECONOMIC_BIAS": OperatorConfig("replace", {"new_value": "[BACKGROUND]"}),
+                "RELIGION_BIAS": OperatorConfig("replace", {"new_value": "[RELIGION]"}),
+                "NATIONALITY_BIAS": OperatorConfig("replace", {"new_value": "[NATIONALITY]"}),
+                "DISABILITY_BIAS": OperatorConfig("replace", {"new_value": "[ABILITY]"}),
+                "POLITICAL_BIAS": OperatorConfig("replace", {"new_value": "[POLITICAL]"}),
+                "FAMILY_STATUS_BIAS": OperatorConfig("replace", {"new_value": "[FAMILY]"}),
+                "EDUCATION_BIAS": OperatorConfig("replace", {"new_value": "[EDUCATION]"}),
+                "INSTITUTION": OperatorConfig("replace", {"new_value": "[INSTITUTION]"}),
+                "DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"}),
+            }
+        
+        elif strategy == "custom":
+            # Custom replacements
+            if self.config.replacement_tokens:
+                operators = {}
+                for entity_type, replacement in self.config.replacement_tokens.items():
+                    operators[entity_type] = OperatorConfig("replace", {"new_value": replacement})
+                operators["DEFAULT"] = OperatorConfig("redact")  # Use redact as default
+                return operators
+            else:
+                # Default to redact if no custom tokens
+                return {"DEFAULT": OperatorConfig("redact")}
+        
+        else:
+            # Default to redact
+            return {"DEFAULT": OperatorConfig("redact")}
     
     def _process_structure(self, 
                           data: Any, 
@@ -482,8 +568,8 @@ class EnhancedTalentProfileAnonymizer:
             return False
         
         # Check if the value contains bias or PII
-        analysis = self.anonymizer.analyze({"text": value})
-        if analysis["total_entities"] > 0:
+        results = self.analyzer.analyze(text=value, language='en')
+        if len(results) > 0:
             return True
         
         # Check field name hints
@@ -494,8 +580,18 @@ class EnhancedTalentProfileAnonymizer:
         return False
     
     def _anonymize_value(self, value: str, context: str) -> str:
-        """Anonymize a string value."""
-        return self.anonymizer.anonymize_text(value)
+        """Anonymize a string value using Presidio with our configuration."""
+        # Analyze text with our custom recognizers
+        results = self.analyzer.analyze(text=value, language='en')
+        
+        # Anonymize with our configured operators (remove/replace)
+        anonymized_result = self.anonymizer_engine.anonymize(
+            text=value,
+            analyzer_results=results,
+            operators=self.operators
+        )
+        
+        return anonymized_result.text
     
     def _hash_value(self, value: str) -> str:
         """Hash a value."""
