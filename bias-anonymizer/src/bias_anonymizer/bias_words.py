@@ -1,5 +1,6 @@
 """
-Bias words definitions for detecting bias-inducing terms.
+Comprehensive bias words definitions with all categories.
+Exact word list as specified by the user.
 """
 
 from dataclasses import dataclass
@@ -8,19 +9,17 @@ from typing import Dict, List
 
 @dataclass
 class BiasWords:
-    """Container for all bias-related words."""
+    """Container for all bias-related words organized by category."""
     
     # Gender-related words
     male_words = [
         "he", "him", "his", "man", "male", "boy", "father", "son", "brother",
-        "husband", "boyfriend", "gentleman", "guy", "mr", "masculine", "paternal",
-        "dad", "father"
+        "husband", "boyfriend", "gentleman", "guy", "mr", "masculine", "paternal", "dad", "father"
     ]
     
     female_words = [
         "she", "her", "hers", "woman", "female", "girl", "mother", "daughter",
-        "sister", "wife", "girlfriend", "lady", "ms", "mrs", "feminine", "maternal",
-        "mom", "mother"
+        "sister", "wife", "girlfriend", "lady", "ms", "mrs", "feminine", "maternal", "mom", "mother"
     ]
     
     gender_neutral_words = [
@@ -204,28 +203,24 @@ class BiasWords:
     
     @classmethod
     def get_all_categories(cls) -> Dict[str, List[str]]:
-        """Get all bias categories and their associated words."""
+        """Get all bias categories and their associated words as per ALL_BIAS_CATEGORIES."""
         return {
             'gender': cls.male_words + cls.female_words + cls.gender_neutral_words,
-            'race_ethnicity': (cls.european_words + cls.african_words + 
-                              cls.asian_words + cls.hispanic_words + 
-                              cls.middle_eastern_words),
+            'race_ethnicity': (cls.european_words + cls.african_words + cls.asian_words +
+                              cls.hispanic_words + cls.middle_eastern_words),
             'age': cls.young_age_words + cls.middle_age_words + cls.older_age_words,
             'disability': cls.disabled_words + cls.able_bodied_words,
-            'marital_status': (cls.single_status_words + cls.married_status_words + 
-                              cls.parent_status_words),
+            'marital_status': cls.single_status_words + cls.married_status_words + cls.parent_status_words,
             'nationality': cls.domestic_nationality_words + cls.foreign_nationality_words,
             'sexual_orientation': cls.heterosexual_words + cls.lgbtq_words,
-            'religion': (cls.christian_words + cls.muslim_words + 
-                        cls.jewish_words + cls.eastern_religion_words + 
-                        cls.secular_words),
+            'religion': (cls.christian_words + cls.muslim_words + cls.jewish_words +
+                        cls.eastern_religion_words + cls.secular_words),
             'political_affiliation': cls.conservative_words + cls.liberal_words,
             'socioeconomic_background': cls.wealthy_words + cls.working_class_words,
             'pregnancy_maternity': cls.pregnancy_maternity_words,
             'union_membership': cls.union_words + cls.non_union_words,
             'health_condition': cls.health_condition_words,
-            'criminal_background': (cls.criminal_background_words + 
-                                   cls.clean_background_words)
+            'criminal_background': cls.criminal_background_words + cls.clean_background_words
         }
     
     @classmethod
@@ -235,98 +230,30 @@ class BiasWords:
         return all_categories.get(category, [])
     
     @classmethod
-    def add_custom_words(cls, category: str, words: List[str]):
-        """
-        Add custom words to a category.
-        
-        Args:
-            category: The category to add words to
-            words: List of words to add
-        """
-        category_mapping = {
-            'gender': {
-                'male': cls.male_words,
-                'female': cls.female_words,
-                'neutral': cls.gender_neutral_words
-            },
-            'race_ethnicity': {
-                'european': cls.european_words,
-                'african': cls.african_words,
-                'asian': cls.asian_words,
-                'hispanic': cls.hispanic_words,
-                'middle_eastern': cls.middle_eastern_words
-            },
-            'age': {
-                'young': cls.young_age_words,
-                'middle': cls.middle_age_words,
-                'older': cls.older_age_words
-            },
-            'disability': {
-                'disabled': cls.disabled_words,
-                'able': cls.able_bodied_words
-            },
-            'marital_status': {
-                'single': cls.single_status_words,
-                'married': cls.married_status_words,
-                'parent': cls.parent_status_words
-            },
-            'nationality': {
-                'domestic': cls.domestic_nationality_words,
-                'foreign': cls.foreign_nationality_words
-            },
-            'sexual_orientation': {
-                'heterosexual': cls.heterosexual_words,
-                'lgbtq': cls.lgbtq_words
-            },
-            'religion': {
-                'christian': cls.christian_words,
-                'muslim': cls.muslim_words,
-                'jewish': cls.jewish_words,
-                'eastern': cls.eastern_religion_words,
-                'secular': cls.secular_words
-            },
-            'political_affiliation': {
-                'conservative': cls.conservative_words,
-                'liberal': cls.liberal_words
-            },
-            'socioeconomic_background': {
-                'wealthy': cls.wealthy_words,
-                'working_class': cls.working_class_words
-            },
-            'pregnancy_maternity': {
-                'pregnancy': cls.pregnancy_maternity_words
-            },
-            'union_membership': {
-                'union': cls.union_words,
-                'non_union': cls.non_union_words
-            },
-            'health_condition': {
-                'health': cls.health_condition_words
-            },
-            'criminal_background': {
-                'criminal': cls.criminal_background_words,
-                'clean': cls.clean_background_words
-            }
-        }
-        
-        # Find the appropriate list and add words
-        if category in category_mapping:
-            for subcategory, word_list in category_mapping[category].items():
-                if subcategory in category.lower():
-                    word_list.extend(words)
-                    break
-            else:
-                # If no subcategory matches, add to the first one
-                first_subcategory = list(category_mapping[category].values())[0]
-                first_subcategory.extend(words)
+    def get_word_to_category_mapping(cls) -> Dict[str, str]:
+        """Create a reverse mapping from word to its category."""
+        word_to_category = {}
+        for category, words in cls.get_all_categories().items():
+            for word in words:
+                word_lower = word.lower()
+                # Store the category for this word (keeps last occurrence if duplicate)
+                word_to_category[word_lower] = category
+        return word_to_category
+    
+    @classmethod
+    def identify_bias_category(cls, word: str) -> str:
+        """Identify which bias category a word belongs to."""
+        mapping = cls.get_word_to_category_mapping()
+        return mapping.get(word.lower(), "unknown")
     
     @classmethod
     def get_all_bias_words(cls) -> List[str]:
-        """Get all bias words across all categories."""
+        """Get all bias words across all categories (unique)."""
         all_words = []
         for words_list in cls.get_all_categories().values():
             all_words.extend(words_list)
-        return list(set(all_words))  # Remove duplicates
+        # Return with duplicates included as they appear in the lists
+        return all_words
     
     @classmethod
     def get_statistics(cls) -> Dict[str, int]:
@@ -335,7 +262,11 @@ class BiasWords:
         categories = cls.get_all_categories()
         
         stats['total_categories'] = len(categories)
-        stats['total_unique_words'] = len(cls.get_all_bias_words())
+        # Count unique words across all categories
+        unique_words = set()
+        for words_list in categories.values():
+            unique_words.update([w.lower() for w in words_list])
+        stats['total_unique_words'] = len(unique_words)
         
         for category, words in categories.items():
             stats[f'{category}_count'] = len(words)

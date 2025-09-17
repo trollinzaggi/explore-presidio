@@ -29,7 +29,7 @@ class TalentProfileConfig:
     # Anonymization strategy: "redact", "replace", or "custom"
     # redact: removes bias words completely
     # replace: replaces with tokens like [GENDER], [RACE]
-    # custom: uses custom replacement tokens
+    # custom: uses operators dict for fine-grained control per entity type
     anonymization_strategy: str = "redact"
     
     # Custom replacement tokens for "custom" strategy
@@ -41,7 +41,8 @@ class TalentProfileConfig:
     # Detection settings
     detect_bias: bool = True
     detect_pii: bool = True
-    confidence_threshold: float = 0.7
+    confidence_threshold: float = 0.5
+    language: str = "en"
     
     def __post_init__(self):
         # Only set defaults if not provided (allows YAML to override everything)
@@ -83,6 +84,13 @@ class TalentProfileAnonymizer:
         # Initialize Presidio components
         self.analyzer = AnalyzerEngine()
         self.anonymizer_engine = AnonymizerEngine()
+        
+        # Check if US_SSN is supported
+        supported = self.analyzer.get_supported_entities()
+        if 'US_SSN' not in supported:
+            # This means Presidio doesn't have SSN recognizer by default
+            # Our enhanced recognizer will handle it
+            pass
         
         # Register custom bias recognizers
         self._register_bias_recognizers()
@@ -133,27 +141,58 @@ class TalentProfileAnonymizer:
             GenderBiasRecognizer,
             RaceBiasRecognizer,
             AgeBiasRecognizer,
-            SocioeconomicBiasRecognizer,
-            ReligionBiasRecognizer,
-            NationalityBiasRecognizer,
             DisabilityBiasRecognizer,
+            MaritalStatusBiasRecognizer,
+            NationalityBiasRecognizer,
+            SexualOrientationBiasRecognizer,
+            ReligionBiasRecognizer,
             PoliticalBiasRecognizer,
-            FamilyStatusBiasRecognizer,
-            EducationBiasRecognizer
+            SocioeconomicBiasRecognizer,
+            PregnancyMaternityBiasRecognizer,
+            UnionMembershipBiasRecognizer,
+            HealthConditionBiasRecognizer,
+            CriminalBackgroundBiasRecognizer
         )
+        
+        # Import enhanced recognizers
+        from bias_anonymizer.enhanced_recognizers import (
+            EnhancedSSNRecognizer,
+            EnhancedPhoneRecognizer,
+            EnhancedAddressRecognizer
+        )
+        
+        # Remove default recognizers that we're replacing
+        # We need to create a new list to avoid modifying during iteration
+        recognizers_to_remove = []
+        for recognizer in self.analyzer.registry.recognizers:
+            if recognizer.__class__.__name__ in ['UsSsnRecognizer', 'PhoneRecognizer']:
+                recognizers_to_remove.append(recognizer)
+        
+        # Now remove them
+        for recognizer in recognizers_to_remove:
+            self.analyzer.registry.recognizers.remove(recognizer)
         
         # Create instances of all recognizers
         recognizers = [
+            # Bias recognizers - all 14 categories
             GenderBiasRecognizer(),
             RaceBiasRecognizer(),
             AgeBiasRecognizer(),
-            SocioeconomicBiasRecognizer(),
-            ReligionBiasRecognizer(),
-            NationalityBiasRecognizer(),
             DisabilityBiasRecognizer(),
+            MaritalStatusBiasRecognizer(),
+            NationalityBiasRecognizer(),
+            SexualOrientationBiasRecognizer(),
+            ReligionBiasRecognizer(),
             PoliticalBiasRecognizer(),
-            FamilyStatusBiasRecognizer(),
-            EducationBiasRecognizer()
+            SocioeconomicBiasRecognizer(),
+            PregnancyMaternityBiasRecognizer(),
+            UnionMembershipBiasRecognizer(),
+            HealthConditionBiasRecognizer(),
+            CriminalBackgroundBiasRecognizer(),
+            # Enhanced PII recognizers - these replace the defaults
+            EnhancedSSNRecognizer(),
+            EnhancedPhoneRecognizer(),
+            EnhancedAddressRecognizer()
         ]
         
         # Register each recognizer with the analyzer
@@ -190,16 +229,65 @@ class TalentProfileAnonymizer:
             }
         
         elif strategy == "custom":
-            # Custom replacements from config
-            if self.profile_config.replacement_tokens:
-                operators = {}
-                for entity_type, replacement in self.profile_config.replacement_tokens.items():
-                    operators[entity_type] = OperatorConfig("replace", {"new_value": replacement})
-                operators["DEFAULT"] = OperatorConfig("redact")  # Use redact as default
-                return operators
-            else:
-                # Default to redact if no custom tokens
-                return {"DEFAULT": OperatorConfig("redact")}
+            # Use operators dict for fine-grained control per entity type
+            operators = {}
+            
+            # Process each operator from the config
+            if self.profile_config.operators:
+                for entity_type, operator_type in self.profile_config.operators.items():
+                    
+                    if operator_type == "redact":
+                        # Redact (remove) the entity
+                        operators[entity_type] = OperatorConfig("redact")
+                    
+                    elif operator_type == "replace":
+                        # Replace with token from replacement_tokens
+                        token = self.profile_config.replacement_tokens.get(
+                            entity_type,
+                            self.profile_config.replacement_tokens.get("DEFAULT", "[REDACTED]")
+                        )
+                        operators[entity_type] = OperatorConfig("replace", {"new_value": token})
+                    
+                    elif operator_type == "mask":
+                        # Mask the entity with proper parameters
+                        operators[entity_type] = OperatorConfig("mask", {
+                            "masking_char": "*",
+                            "chars_to_mask": 100,  # Mask all
+                            "from_end": False
+                        })
+                    
+                    elif operator_type == "hash":
+                        # Hash the entity
+                        operators[entity_type] = OperatorConfig("hash", {"hash_type": "sha256"})
+                    
+                    elif operator_type == "encrypt":
+                        # Encrypt the entity
+                        operators[entity_type] = OperatorConfig("encrypt", {
+                            "key": "default_key"  # Should be from config
+                        })
+                    
+                    elif operator_type == "keep":
+                        # Keep the entity as-is
+                        operators[entity_type] = OperatorConfig("keep")
+                    
+                    else:
+                        # Default to redact if unknown operator
+                        operators[entity_type] = OperatorConfig("redact")
+            
+            # Set default operator if not specified
+            if "DEFAULT" not in operators:
+                if self.profile_config.operators and "DEFAULT" in self.profile_config.operators:
+                    default_op = self.profile_config.operators["DEFAULT"]
+                else:
+                    default_op = "redact"
+                
+                if default_op == "replace":
+                    token = self.profile_config.replacement_tokens.get("DEFAULT", "[REDACTED]")
+                    operators["DEFAULT"] = OperatorConfig("replace", {"new_value": token})
+                else:
+                    operators["DEFAULT"] = OperatorConfig("redact")
+            
+            return operators
         
         else:
             # Default to redact
@@ -338,7 +426,12 @@ class TalentProfileAnonymizer:
     def _anonymize_text(self, text: str) -> str:
         """Anonymize text using Presidio with our configuration."""
         # Analyze text with our custom recognizers
-        results = self.analyzer.analyze(text=text, language='en')
+        # Use the confidence threshold from config
+        results = self.analyzer.analyze(
+            text=text, 
+            language='en',
+            score_threshold=self.profile_config.confidence_threshold
+        )
         
         # Anonymize with our configured operators
         anonymized_result = self.anonymizer_engine.anonymize(
@@ -532,7 +625,11 @@ class TalentProfileAnonymizer:
             value = self._get_field_value(profile, field_path)
             if value and isinstance(value, str):
                 # Analyze with Presidio
-                results = self.analyzer.analyze(text=value, language='en')
+                results = self.analyzer.analyze(
+                    text=value, 
+                    language='en',
+                    score_threshold=self.profile_config.confidence_threshold
+                )
                 
                 if results:
                     # Categorize entity types

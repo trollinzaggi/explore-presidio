@@ -6,10 +6,12 @@ detect_bias: true
 detect_pii: true
 
 # Anonymization strategy: redact, replace, or custom
-anonymization_strategy: redact
+# IMPORTANT: Use 'custom' to respect individual operator configurations
+anonymization_strategy: custom
 
 # Confidence threshold for detection (0.0 to 1.0)
-confidence_threshold: 0.7
+# Lower values mean more aggressive detection
+confidence_threshold: 0.5
 
 # Language for analysis
 language: en
@@ -148,13 +150,19 @@ operators:
   AGE_BIAS: redact
   DISABILITY_BIAS: redact
   MARITAL_STATUS_BIAS: redact
+  FAMILY_STATUS_BIAS: redact  # Alias for marital status
   NATIONALITY_BIAS: redact
   SEXUAL_ORIENTATION_BIAS: redact
   RELIGION_BIAS: redact
   POLITICAL_AFFILIATION_BIAS: redact
+  POLITICAL_BIAS: redact  # Alias
   SOCIOECONOMIC_BIAS: redact
-  FAMILY_STATUS_BIAS: redact
-  EDUCATION_BIAS: redact
+  EDUCATION_BIAS: redact  # Part of socioeconomic
+  MATERNITY_BIAS: redact
+  PREGNANCY_BIAS: redact  # Alias
+  UNION_BIAS: redact
+  HEALTH_BIAS: redact
+  CRIMINAL_BIAS: redact
   
   # Catch-all for bias indicators
   BIAS_INDICATOR: redact

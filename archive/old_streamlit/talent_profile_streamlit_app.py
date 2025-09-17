@@ -1,15 +1,18 @@
 """
-Simplified Streamlit App for Talent Profile Anonymization
-This version can run standalone without complex imports
+Streamlit App for Talent Profile Anonymization
+Uses the full Enhanced Talent Profile Anonymizer
 """
 
 import streamlit as st
 import json
-import os
+import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-import hashlib
-import re
+
+# Add the bias-anonymizer module to the path
+sys.path.append(str(Path(__file__).parent / "bias-anonymizer/src"))
+
+# Import our enhanced anonymizer
+from bias_anonymizer.enhanced_talent_profile_anonymizer import EnhancedTalentProfileAnonymizer
 
 # Page configuration
 st.set_page_config(
@@ -42,131 +45,19 @@ st.markdown("""
         margin-bottom: 20px;
         text-align: center;
     }
+    .json-viewer {
+        background-color: #f5f5f5;
+        padding: 10px;
+        border-radius: 5px;
+        max-height: 600px;
+        overflow-y: auto;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 
-class SimpleAnonymizer:
-    """Simple anonymizer for demonstration (without Presidio dependencies)."""
-    
-    def __init__(self):
-        """Initialize with bias terms."""
-        self.bias_terms = {
-            "gender": ["male", "female", "man", "woman", "boy", "girl", "he", "she", 
-                      "his", "her", "husband", "wife", "son", "daughter", "mother", "father"],
-            "race": ["white", "black", "asian", "hispanic", "african", "european", 
-                    "chinese", "indian", "latino", "caucasian"],
-            "age": ["young", "old", "elderly", "millennial", "boomer", "gen-z", 
-                   "senior", "junior", "veteran", "experienced"],
-            "religion": ["christian", "muslim", "jewish", "hindu", "buddhist", 
-                        "catholic", "protestant", "atheist", "church", "mosque"],
-            "status": ["married", "single", "divorced", "widowed", "partnered",
-                      "wealthy", "poor", "rich", "privileged", "working-class"],
-            "orientation": ["gay", "lesbian", "straight", "heterosexual", "homosexual",
-                          "bisexual", "lgbtq", "queer"],
-            "disability": ["disabled", "wheelchair", "blind", "deaf", "handicapped",
-                         "impaired", "disability"],
-            "political": ["republican", "democrat", "conservative", "liberal", 
-                         "left-wing", "right-wing"]
-        }
-        
-        self.pii_patterns = {
-            "email": r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-            "phone": r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',
-            "ssn": r'\b\d{3}-\d{2}-\d{4}\b',
-            "date": r'\b\d{4}-\d{2}-\d{2}\b'
-        }
-    
-    def anonymize_profile(self, profile: Dict) -> Dict:
-        """
-        Anonymize a profile by removing bias terms and PII.
-        
-        Args:
-            profile: Profile dictionary
-            
-        Returns:
-            Anonymized profile
-        """
-        import copy
-        anonymized = copy.deepcopy(profile)
-        self._process_dict(anonymized)
-        return anonymized
-    
-    def _process_dict(self, data: Any, parent_key: str = ""):
-        """Recursively process dictionary."""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                current_key = f"{parent_key}.{key}" if parent_key else key
-                
-                # Skip certain fields
-                if key.lower() in ["code", "id", "type", "category", "status", "degree", 
-                                  "certifications", "areaOfStudy", "score", "level"]:
-                    continue
-                
-                if isinstance(value, str):
-                    # Anonymize string values
-                    data[key] = self._anonymize_string(value, current_key)
-                elif isinstance(value, (dict, list)):
-                    self._process_dict(value, current_key)
-                    
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, (dict, list)):
-                    self._process_dict(item, parent_key)
-                elif isinstance(item, str):
-                    # Note: Can't modify list items in place easily
-                    pass
-    
-    def _anonymize_string(self, text: str, field_name: str) -> str:
-        """Anonymize a string value."""
-        if not text:
-            return text
-        
-        # Special handling for certain fields
-        if "date" in field_name.lower() or "year" in field_name.lower():
-            # Extract year only
-            year_match = re.search(r'\b(19|20)\d{2}\b', text)
-            if year_match:
-                return year_match.group()
-        
-        if field_name.lower().endswith("by"):
-            return "[REDACTED]"
-        
-        if "userid" in field_name.lower() or "user_id" in field_name.lower():
-            # Hash user IDs
-            return f"HASH_{hashlib.md5(text.encode()).hexdigest()[:8]}"
-        
-        # Remove bias terms
-        result = text
-        for category, terms in self.bias_terms.items():
-            for term in terms:
-                # Case-insensitive replacement
-                pattern = re.compile(re.escape(term), re.IGNORECASE)
-                result = pattern.sub("", result)
-        
-        # Remove PII patterns
-        for pii_type, pattern in self.pii_patterns.items():
-            result = re.sub(pattern, f"[{pii_type.upper()}]", result)
-        
-        # Clean up multiple spaces
-        result = re.sub(r'\s+', ' ', result).strip()
-        
-        # If string became too short, return a placeholder
-        if len(result) < 3 and len(text) > 10:
-            if "description" in field_name.lower():
-                return "[DESCRIPTION]"
-            elif "title" in field_name.lower():
-                return "[TITLE]"
-            elif "name" in field_name.lower():
-                return "[NAME]"
-            else:
-                return "[REDACTED]"
-        
-        return result
-
-
-def get_sample_profiles() -> Dict[str, Any]:
-    """Get sample talent profiles for demonstration."""
+def get_sample_profiles():
+    """Get sample profiles for demonstration."""
     return {
         "Profile_001_John_Smith": {
             "userId": "USER_12345",
@@ -184,12 +75,23 @@ def get_sample_profiles() -> Dict[str, Any]:
                 "businessTitle": "Senior Engineer from wealthy background",
                 "jobCode": "ENG_SR_001",
                 "enterpriseSeniorityDate": "1995-06-15",
+                "gcrs": {
+                    "businessDivisionCode": "TECH",
+                    "businessDivisionDescription": "Technology Division - Predominantly white males",
+                    "businessUnitCode": "CLOUD",
+                    "businessUnitDescription": "Cloud Computing Unit"
+                },
                 "workLocation": {
                     "code": "SF_HQ_01",
                     "description": "San Francisco Headquarters - Liberal area",
                     "city": "San Francisco",
                     "state": "California",
                     "country": "United States"
+                },
+                "reportingDistance": {
+                    "geb": "3",
+                    "ceo": "4",
+                    "chairman": "5"
                 }
             },
             "workEligibility": "US Citizen, no visa required",
@@ -210,7 +112,8 @@ def get_sample_profiles() -> Dict[str, Any]:
                     }
                 ],
                 "crossDivisionalExperience": "Yes",
-                "internationalExperience": "Yes"
+                "internationalExperience": "Yes",
+                "timeInCurrentRoleInDays": "1095"
             },
             "qualification": {
                 "educations": [
@@ -234,13 +137,18 @@ def get_sample_profiles() -> Dict[str, Any]:
                 ],
                 "awards": [
                     {
-                        "name": "Best Manager Award",
+                        "name": "Best Manager Award from CEO",
                         "organization": "Tech Corp",
                         "date": "2023-05-15"
                     }
-                ]
+                ],
+                "memberships": []
             },
-            "careerPreference": "Looking for young, energetic team without family obligations"
+            "careerAspirationPreference": "Looking to lead C-suite",
+            "careerLocationPreference": "Prefer conservative states",
+            "careerRolePreference": "Looking for young, energetic team without family obligations",
+            "version": "1.0",
+            "completionScore": "95"
         },
         "Profile_002_Maria_Garcia": {
             "userId": "USER_67890",
@@ -324,6 +232,31 @@ def get_sample_profiles() -> Dict[str, Any]:
     }
 
 
+def anonymize_profile(profile_data):
+    """
+    Function to anonymize a single profile using our Enhanced Talent Profile Anonymizer.
+    
+    Args:
+        profile_data: The talent profile dictionary
+        
+    Returns:
+        Anonymized profile dictionary
+    """
+    try:
+        # Initialize the anonymizer
+        anonymizer = EnhancedTalentProfileAnonymizer()
+        
+        # Anonymize the profile
+        anonymized_profile = anonymizer.anonymize_talent_profile(profile_data)
+        
+        return anonymized_profile
+    except Exception as e:
+        st.error(f"Error during anonymization: {str(e)}")
+        # Return a basic anonymization if the full version fails
+        import copy
+        return copy.deepcopy(profile_data)
+
+
 def main():
     """Main Streamlit app function."""
     
@@ -335,22 +268,19 @@ def main():
     if 'selected_profile' not in st.session_state:
         st.session_state.selected_profile = None
     
-    # Initialize anonymizer
-    anonymizer = SimpleAnonymizer()
-    
     # Header
     st.markdown("""
         <div class="profile-header">
             <h1>🔒 Talent Profile Anonymizer</h1>
-            <p>Remove bias and PII from employee profiles for fair candidate matching</p>
+            <p>Remove bias and PII from employee profiles using Microsoft Presidio</p>
         </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar
+    # Sidebar for settings and file upload
     with st.sidebar:
         st.header("⚙️ Settings")
         
-        # File upload
+        # File upload option
         uploaded_file = st.file_uploader(
             "Upload JSON file with profiles",
             type=['json'],
@@ -367,6 +297,7 @@ def main():
                 st.error(f"Error loading file: {e}")
                 profiles_data = get_sample_profiles()
         else:
+            # Use sample profiles if no file uploaded
             profiles_data = get_sample_profiles()
             if not st.session_state.profiles_data:
                 st.session_state.profiles_data = profiles_data
@@ -374,14 +305,23 @@ def main():
                 profiles_data = st.session_state.profiles_data
         
         st.divider()
+        
+        # Display statistics
+        st.subheader("📊 Statistics")
         st.metric("Total Profiles", len(profiles_data))
         
         if st.session_state.anonymized_profile:
             st.success("✅ Profile Anonymized")
+            
+            # Count removed bias terms (simple approximation)
+            original_str = json.dumps(st.session_state.selected_profile)
+            anonymized_str = json.dumps(st.session_state.anonymized_profile)
+            reduction = len(original_str) - len(anonymized_str)
+            st.metric("Characters Removed", reduction)
     
-    # Main content
+    # Main content area
     if profiles_data:
-        # Profile selector
+        # Profile selector dropdown
         selected_entry = st.selectbox(
             "📋 Select a Profile to Anonymize:",
             list(profiles_data.keys()),
@@ -389,43 +329,48 @@ def main():
             help="Choose a talent profile from the dropdown"
         )
         
+        # Store the selected profile
         if selected_entry:
             st.session_state.selected_profile = profiles_data[selected_entry]
             
-            # Two columns for side-by-side display
+            # Create two columns for side-by-side display
             col_left, col_right = st.columns(2)
             
             # Left column - Original Profile
             with col_left:
                 st.subheader("📄 Original Profile")
-                st.json(st.session_state.selected_profile)
+                with st.container():
+                    st.json(st.session_state.selected_profile)
             
             # Right column - Anonymized Profile
             with col_right:
                 st.subheader("🔐 Anonymized Profile")
                 if st.session_state.anonymized_profile:
-                    st.json(st.session_state.anonymized_profile)
+                    with st.container():
+                        st.json(st.session_state.anonymized_profile)
                 else:
-                    st.info("Click 'Anonymize Profile' to see the anonymized version")
+                    st.info("Click 'Anonymize Profile' button below to see the anonymized version")
             
-            # Anonymize button
-            col1, col2, col3 = st.columns([1, 1, 1])
+            # Anonymize button - centered at the bottom
+            st.divider()
+            col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
                 if st.button("🔒 Anonymize Profile", type="primary", use_container_width=True):
-                    with st.spinner("Anonymizing profile..."):
-                        try:
-                            # Perform anonymization
-                            anonymized = anonymizer.anonymize_profile(
-                                st.session_state.selected_profile
-                            )
-                            st.session_state.anonymized_profile = anonymized
-                            st.success("✅ Profile successfully anonymized!")
-                            st.balloons()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                    with st.spinner("Anonymizing profile using Enhanced Talent Profile Anonymizer..."):
+                        # Call the anonymize function with the selected profile
+                        anonymized = anonymize_profile(st.session_state.selected_profile)
+                        
+                        # Store the result
+                        st.session_state.anonymized_profile = anonymized
+                        
+                        # Show success message
+                        st.success("✅ Profile successfully anonymized!")
+                        st.balloons()
+                        
+                        # Rerun to update the display
+                        st.rerun()
             
-            # Additional actions
+            # Additional action buttons
             st.divider()
             col1, col2, col3 = st.columns(3)
             
@@ -436,16 +381,46 @@ def main():
             
             with col2:
                 if st.session_state.anonymized_profile:
+                    # Download button for anonymized profile
                     anonymized_json = json.dumps(st.session_state.anonymized_profile, indent=2)
                     st.download_button(
-                        label="📥 Download Anonymized",
+                        label="📥 Download Anonymized Profile",
                         data=anonymized_json,
                         file_name=f"anonymized_{selected_entry}.json",
                         mime="application/json",
                         use_container_width=True
                     )
+            
+            with col3:
+                if st.session_state.selected_profile and st.session_state.anonymized_profile:
+                    # Show comparison details
+                    if st.button("📊 Show Details", use_container_width=True):
+                        with st.expander("Anonymization Details", expanded=True):
+                            st.write("**What was removed:**")
+                            st.write("- Gender, race, and age indicators")
+                            st.write("- Marital and family status")
+                            st.write("- Religious and political affiliations")
+                            st.write("- Socioeconomic background indicators")
+                            st.write("- Health and disability information")
+                            st.write("- Names and personal identifiers")
+                            
+                            st.write("\n**What was preserved:**")
+                            st.write("- Job codes and rank codes")
+                            st.write("- Technical skills and certifications")
+                            st.write("- Degrees and areas of study")
+                            st.write("- Years of experience")
+                            st.write("- Organizational codes")
     else:
-        st.warning("No profiles available. Please upload a JSON file.")
+        st.warning("No profiles available. Please upload a JSON file with talent profiles.")
+    
+    # Footer
+    st.divider()
+    st.markdown("""
+        <div style='text-align: center; color: #888; padding: 20px;'>
+            <p>Built with Microsoft Presidio and Enhanced Talent Profile Anonymizer</p>
+            <p>Ensures fair and unbiased talent matching</p>
+        </div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
