@@ -3,6 +3,16 @@ Verify and demonstrate the custom bias words are loaded correctly.
 """
 
 import json
+import sys
+import os
+
+# Add src to path
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+except NameError:
+    # Fallback if __file__ is not defined
+    sys.path.insert(0, os.path.join(os.getcwd(), '..', 'src'))
+
 from bias_anonymizer import JSONAnonymizer, BiasWords
 
 

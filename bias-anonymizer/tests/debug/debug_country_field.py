@@ -5,7 +5,7 @@ Debug why 555-HR-HELP isn't being anonymized in the country field
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from bias_anonymizer.config_loader import create_anonymizer_from_config
 from presidio_analyzer import AnalyzerEngine

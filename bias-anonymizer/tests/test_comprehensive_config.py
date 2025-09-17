@@ -13,7 +13,7 @@ from typing import Dict, Any, List
 import re
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Suppress SSL warning
 import warnings
@@ -25,7 +25,8 @@ from bias_anonymizer.talent_profile_anonymizer import TalentProfileAnonymizer
 
 def load_default_config():
     """Load the default_config.yaml file."""
-    config_path = Path(__file__).parent / "config" / "default_config.yaml"
+    # Go up from tests/ to bias-anonymizer/ then into config/
+    config_path = Path(__file__).parent.parent / "config" / "default_config.yaml"
     
     if not config_path.exists():
         raise FileNotFoundError(f"default_config.yaml not found at {config_path}")

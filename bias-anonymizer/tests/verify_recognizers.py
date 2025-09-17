@@ -5,7 +5,7 @@ Verify that TalentProfileAnonymizer has all the required recognizers registered.
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from bias_anonymizer.config_loader import create_anonymizer_from_config
 

@@ -5,7 +5,7 @@ Final comprehensive test of all bias categories with actual anonymization.
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from bias_anonymizer.config_loader import create_anonymizer_from_config
 from bias_anonymizer.bias_words import BiasWords
